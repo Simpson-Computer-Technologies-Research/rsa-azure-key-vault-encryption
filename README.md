@@ -9,8 +9,11 @@ Enterprise-level encryption
 //
 //
 
-// accessToken is from the users signed in session
-// store the public key in localStorage to prevent unnecessary requests
+//
+// accessToken is from the users signed in Microsoft Entra ID + MSAL (Azure) session
+//
+// Store the public key in localStorage to prevent unnecessary requests
+//
 const getPublicKey = async (accessToken: string) => {
     const res = await fetch(
         "https://<YOUR_KEYVAULT_NAME>.vault.azure.net/keys/MyRSAKey?api-version=7.3",
@@ -26,9 +29,12 @@ const getPublicKey = async (accessToken: string) => {
     return data.key.n; // Public Key modulus (part of JWK format)
 }
 
-// this is called in the useCache.ts file
+//
+// This is called in the useCache.ts file -> just pass the publicKey as the encryptionToken
+//
 // data -> data to encrypt
 // publicKey -> from function above
+//
 const encryptData(data: string, publicKey: string): Promise<string> {
     const _publicKey = forge.pki.publicKeyFromPem(publicKey);
     const encrypted = _publicKey.encrypt(data, "RSA-OAEP");
@@ -42,9 +48,11 @@ const encryptData(data: string, publicKey: string): Promise<string> {
 //
 //
 
-// pretty sure azure has a javascript library for this instead of sending http requests
 //
-// accessToken is sent in the http request headers
+// Pretty sure azure has a javascript library for this instead of sending http requests
+//
+// accessToken is recieved from the frontend HTTP request "Authorization" header
+//
 async function decryptData(encryptedData: string, accessToken: string): Promise<string> {
     const url = "https://<YOUR_KEYVAULT_NAME>.vault.azure.net/decrypt?api-version=7.3";
     
@@ -65,7 +73,9 @@ async function decryptData(encryptedData: string, accessToken: string): Promise<
     return Buffer.from(data.value, "base64").toString("utf-8");
 }
 
+//
 // Azure Key Vault supports automatic key rotation. Just enable it and then encrypt the following instead of ONLY the data:
+//
 const dataToEncrypt = JSON.stringify({
     data: sensitiveData,
     expiresAt: Date.now() + 3600 * 1000, // Expires in 1 hour
