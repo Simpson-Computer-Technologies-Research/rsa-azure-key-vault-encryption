@@ -9,35 +9,52 @@ Enterprise-level encryption
 //
 //
 
-//
-// accessToken is from the users signed in Microsoft Entra ID + MSAL (Azure) session
-//
-// Store the public key in localStorage to prevent unnecessary requests
-//
-const getPublicKey = async (accessToken: string) => {
-    const res = await fetch(
-        "https://<YOUR_KEYVAULT_NAME>.vault.azure.net/keys/MyRSAKey?api-version=7.3",
-        {
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-            },
+import forge from "node-forge";
+import axios from "axios";
+
+/**
+ * Get public key from Azure Key Vault
+ * 
+ * @param azureAccessToken Azure access token
+ * 
+ * @returns Public key
+ * 
+ * @example
+ * const publicKey = await getPublicKey({ azureAccessToken });
+ */
+export const getPublicKey = async ({ azureAccessToken }: { azureAccessToken: string }) => {
+    const url = "https://<YOUR_KEYVAULT_NAME>.vault.azure.net/keys/MyRSAKey?api-version=7.3";
+
+    const res = await axios.get(url, {
+        headers: {
+            Authorization: `Bearer ${azureAccessToken}`,
         }
-    );
+    });
 
-    const data = await res.json();
+    const json = await res.json();
 
-    return data.key.n; // Public Key modulus (part of JWK format)
+    return json.key.n;
 }
 
-//
-// This is called in the useCache.ts file -> just pass the publicKey as the encryptionToken
-//
-// data -> data to encrypt
-// publicKey -> from function above
-//
-const encryptData(data: string, publicKey: string): Promise<string> {
+/**
+ * Encrypt data with a public key (RSA)
+ * 
+ * @param data Data to encrypt
+ * @param publicKey Public key to encrypt with
+ * @param expiresAt Expiration date in milliseconds
+ * 
+ * @returns Encrypted data
+ * 
+ * @example
+ * const publicKey = await getPublicKey({ azureAccessToken });
+ * const encrypted = await encrypt({ data: "Hello, World!", publicKey, expiresAt: Date.now() + 3600 * 1000 }); // Expires in 1 hour
+ */
+export const encrypt = async ({ data, publicKey, expiresAt }: Readonly<{ data: string | undefined; publicKey: string; expiresAt?: number }>) => {
+    const _toEncrypt = expiresAt !== undefined ? JSON.stringify({ data, expiresAt }) : data;
+
     const _publicKey = forge.pki.publicKeyFromPem(publicKey);
-    const encrypted = _publicKey.encrypt(data, "RSA-OAEP");
+
+    const encrypted = _publicKey.encrypt(_toEncrypt, "RSA-OAEP");
 
     return forge.util.encode64(encrypted);
 }
@@ -48,36 +65,32 @@ const encryptData(data: string, publicKey: string): Promise<string> {
 //
 //
 
-//
-// Pretty sure azure has a javascript library for this instead of sending http requests
-//
-// accessToken is recieved from the frontend HTTP request "Authorization" header
-//
-async function decryptData(encryptedData: string, accessToken: string): Promise<string> {
+/**
+ * Decrypt data with a private key (RSA)
+ * 
+ * @param data Data to decrypt
+ * @param privateKey Private key to decrypt with
+ * 
+ * @returns Decrypted data
+ * 
+ * @example
+ * const decrypted = await decrypt({ data: encrypted, azureAccessToken });
+ */
+export const decrypt = async ({ data, azureAccessToken }: Readonly<{ data: string | undefined; azureAccessToken: string; }>) => {
     const url = "https://<YOUR_KEYVAULT_NAME>.vault.azure.net/decrypt?api-version=7.3";
-    
-    const response = await fetch(url, {
-        method: "POST",
+
+    const res = await axios.post(url, {
+        alg: "RSA-OAEP",
+        value: data,
+    }, {
         headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${azureAccessToken}`,
             "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-            alg: "RSA-OAEP",
-            value: encryptedData,
-        }),
+        }
     });
 
-    const data = await response.json();
+    const json = await res.json();
 
-    return Buffer.from(data.value, "base64").toString("utf-8");
+    return forge.util.decode64(json.value);
 }
-
-//
-// Azure Key Vault supports automatic key rotation. Just enable it and then encrypt the following instead of ONLY the data:
-//
-const dataToEncrypt = JSON.stringify({
-    data: sensitiveData,
-    expiresAt: Date.now() + 3600 * 1000, // Expires in 1 hour
-});
 ```
